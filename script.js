@@ -26,6 +26,7 @@ const LANGUAGE_DATA = {
     dateLabel: "Select Date",
     languageLabel: "Language",
     loadButton: "Load Panchanga",
+    detectingLocation: "Detecting location...",
     waiting: "Waiting for data...",
     loading: "Loading Panchanga...",
     invalidDate: "Please select a valid date.",
@@ -57,6 +58,7 @@ const LANGUAGE_DATA = {
     dateLabel: "तारीख चुनें",
     languageLabel: "भाषा",
     loadButton: "पंचांग लोड करें",
+    detectingLocation: "स्थान पहचाना जा रहा है...",
     waiting: "डेटा की प्रतीक्षा हो रही है...",
     loading: "पंचांग लोड हो रहा है...",
     invalidDate: "कृपया सही तारीख चुनें।",
@@ -88,6 +90,7 @@ const LANGUAGE_DATA = {
     dateLabel: "ದಿನಾಂಕ ಆಯ್ಕೆಮಾಡಿ",
     languageLabel: "ಭಾಷೆ",
     loadButton: "ಪಂಚಾಂಗ ಲೋಡ್ ಮಾಡಿ",
+    detectingLocation: "ಸ್ಥಳವನ್ನು ಪತ್ತೆಹಚ್ಚಲಾಗುತ್ತಿದೆ...",
     waiting: "ಮಾಹಿತಿಗಾಗಿ ಕಾಯುತ್ತಿದೆ...",
     loading: "ಪಂಚಾಂಗ ಲೋಡ್ ಆಗುತ್ತಿದೆ...",
     invalidDate: "ದಯವಿಟ್ಟು ಸರಿಯಾದ ದಿನಾಂಕ ಆಯ್ಕೆಮಾಡಿ.",
@@ -119,6 +122,7 @@ const LANGUAGE_DATA = {
     dateLabel: "Dinam Chinotu",
     languageLabel: "Bhasha",
     loadButton: "Panchangam Avah",
+    detectingLocation: "Sthanam Nirdharayati...",
     waiting: "Dattam Pratikshate...",
     loading: "Panchangam Aharati...",
     invalidDate: "Kripaya sahi dinankam chinotu.",
@@ -467,6 +471,9 @@ const sourceInfo = document.getElementById("sourceInfo");
 let activeLocation = { ...DEFAULT_LOCATION };
 let currentLanguage = "en";
 let latestPanchanga = null;
+let sourceStatusKey = "waiting";
+let locationStatus = "detecting";
+let locationCoordinates = null;
 
 initialize();
 
@@ -482,6 +489,12 @@ function initialize() {
   });
 
   loadBtn.addEventListener("click", loadPanchanga);
+  dateInput.addEventListener("change", () => {
+    const selectedDate = parseDateFromInput();
+    if (selectedDate) {
+      applyWeekdayBackgroundTheme(selectedDate);
+    }
+  });
   languageSelect.addEventListener("change", () => {
     currentLanguage = languageSelect.value;
     applyLanguage();
@@ -493,6 +506,10 @@ function initialize() {
 
 function applyWeekdayBackgroundTheme(date) {
   const dayIndex = date.getDay();
+  applyWeekdayBackgroundByIndex(dayIndex);
+}
+
+function applyWeekdayBackgroundByIndex(dayIndex) {
   document.body.setAttribute("data-weekday", String(dayIndex));
 }
 
@@ -511,16 +528,17 @@ function applyLanguage() {
     }
   }
 
-  if (!latestPanchanga) {
-    sourceInfo.textContent = text.waiting;
-  }
+  renderLocationInfo();
+  renderSourceInfo();
 }
 
 function detectLocation() {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
       activeLocation = { ...DEFAULT_LOCATION };
-      locationInfo.textContent = currentText().geoUnavailable;
+      locationStatus = "unavailable";
+      locationCoordinates = null;
+      renderLocationInfo();
       resolve();
       return;
     }
@@ -532,13 +550,19 @@ function detectLocation() {
           latitude: Number(position.coords.latitude.toFixed(6)),
           longitude: Number(position.coords.longitude.toFixed(6))
         };
-        locationInfo.textContent =
-          currentText().geoDetected + " " + activeLocation.latitude + ", " + activeLocation.longitude;
+        locationStatus = "detected";
+        locationCoordinates = {
+          latitude: activeLocation.latitude,
+          longitude: activeLocation.longitude
+        };
+        renderLocationInfo();
         resolve();
       },
       () => {
         activeLocation = { ...DEFAULT_LOCATION };
-        locationInfo.textContent = currentText().geoDenied;
+        locationStatus = "denied";
+        locationCoordinates = null;
+        renderLocationInfo();
         resolve();
       },
       {
@@ -553,11 +577,13 @@ function detectLocation() {
 async function loadPanchanga() {
   const selectedDate = parseDateFromInput();
   if (!selectedDate) {
-    sourceInfo.textContent = currentText().invalidDate;
+    sourceStatusKey = "invalidDate";
+    renderSourceInfo();
     return;
   }
 
-  sourceInfo.textContent = currentText().loading;
+  sourceStatusKey = "loading";
+  renderSourceInfo();
 
   const payload = {
     year: selectedDate.getFullYear(),
@@ -573,11 +599,13 @@ async function loadPanchanga() {
     const apiData = await fetchPanchangaFromApi(payload);
     latestPanchanga = normalizeApiData(apiData, selectedDate);
     renderPanchanga(latestPanchanga);
-    sourceInfo.textContent = currentText().apiLoaded;
+    sourceStatusKey = "apiLoaded";
+    renderSourceInfo();
   } catch (error) {
     latestPanchanga = calculateFallbackPanchanga(selectedDate, activeLocation.latitude, activeLocation.longitude);
     renderPanchanga(latestPanchanga);
-    sourceInfo.textContent = currentText().fallback;
+    sourceStatusKey = "fallback";
+    renderSourceInfo();
   }
 }
 
@@ -710,6 +738,7 @@ function calculateFallbackPanchanga(date, latitude, longitude) {
 
 function renderPanchanga(data) {
   const text = currentText();
+  applyWeekdayBackgroundByIndex(data.vaasaraIndex);
 
   updateField("samvatsara", localizeValue("samvatsara", data.samvatsara));
   updateField("aayana", localizeAayana(data.aayana));
@@ -960,4 +989,31 @@ function setAllFields(value) {
 
 function currentText() {
   return LANGUAGE_DATA[currentLanguage] || LANGUAGE_DATA.en;
+}
+
+function renderSourceInfo() {
+  const text = currentText();
+  sourceInfo.textContent = text[sourceStatusKey] || text.waiting;
+}
+
+function renderLocationInfo() {
+  const text = currentText();
+
+  if (locationStatus === "detecting") {
+    locationInfo.textContent = text.detectingLocation || LANGUAGE_DATA.en.detectingLocation;
+    return;
+  }
+
+  if (locationStatus === "detected" && locationCoordinates) {
+    locationInfo.textContent =
+      text.geoDetected + " " + locationCoordinates.latitude + ", " + locationCoordinates.longitude;
+    return;
+  }
+
+  if (locationStatus === "denied") {
+    locationInfo.textContent = text.geoDenied;
+    return;
+  }
+
+  locationInfo.textContent = text.geoUnavailable;
 }
